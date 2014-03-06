@@ -212,9 +212,9 @@ require_once 'func.php';
 		{
 			$fileName = __DIR__ . '/' . $file['name'];
 			
-			switch ($fileName)
+			switch (pathinfo($fileName, PATHINFO_FILENAME))
 			{
-				case 'SinemaPark.xls':
+				case 'SinemaStar':
 					if (!file_exists($fileName))
 						throw new Exception("Could not open " . $fileName . " for reading! File does not exist.");
 					
@@ -226,7 +226,7 @@ require_once 'func.php';
 					$halls = array();
 					$hall = '';
 
-					$timeTable = normalizeTimeTable($afishaSheet[0][0]);
+					$timeTable = normalizeTimeTable($afishaSheet[0][0], 'sinemastar');
 
 					foreach ($afishaSheet as $key => $value)
 					{
@@ -297,6 +297,64 @@ require_once 'func.php';
 					
 					$objWriter = PHPExcel_IOFactory::createWriter($templateXls, 'Excel5');
 					$objWriter->save(__DIR__ . '/афиша-заливка.xls');
+					$objPHPExcel = null;
+					break;
+				case 'SinemaPark':
+					if (!file_exists($fileName))
+						throw new Exception("Could not open " . $fileName . " for reading! File does not exist.");
+					
+					$afisha = PHPExcel_IOFactory::load($fileName);
+					$afisha->setActiveSheetIndex(0);
+					$afishaSheet = $afisha->getActiveSheet()->toArray();
+					$afisha = null;
+					
+					$timeTable = normalizeTimeTable($afishaSheet[2][0], 'sinemapark');
+					
+					$halls = array();
+					$hall = '';
+					
+					foreach ($afishaSheet as $key => $value)
+					{
+						if (strstr($value[0], 'Зал'))
+							$hall = $value[0];
+
+						if (($value[1] == '' && $value[2] == '') || strstr($value[0], 'Зал'))
+						{
+							unset($afishaSheet[$key]);
+							continue;
+						}
+
+						if (!$hall == '')
+							$halls[$hall][] = $value;
+					}
+					
+					foreach ($halls as $roomHall => $hall)
+					{
+						foreach ($hall as $film)
+						{
+							$filmTime = '';
+//							$templateXls->getActiveSheet()
+//										->setCellValue('A'.$cellId, normalizeFilmName($filmName))
+//										->setCellValue('B'.$cellId, $timeTable['startDate'])
+//										->setCellValue('C'.$cellId, $timeTable['endDate'])
+//										->setCellValue('D'.$cellId, normalizeTime($filmTime))
+//										->setCellValue('F'.$cellId, normalizeHallName($hallName));
+							echo $roomHall . ' =><br/>';
+							echo $film[1] . '<br/>';
+							for ($i=3; $i<29;$i++)
+							{
+								if ($film[$i] !== '')
+									$filmTime .= $film[$i] . ',';
+							}
+							echo normalizeTime($filmTime) . '<br/>';
+						}
+					}
+					
+					echo '<pre>';
+//					print_r($halls);
+//					print_r($afishaSheet);
+					echo '</pre>';
+					exit;
 					break;
 				default:
 					break;
@@ -304,100 +362,3 @@ require_once 'func.php';
 		}
 	}
 ?>
-<?php
-//
-//$sheet = array();
-//
-//$fileName = __DIR__ . '/SinemaStar.xls';
-//
-//if (empty($fileName))
-//	throw new Exception("No file specified.");
-//
-//if (!file_exists($fileName))
-//	throw new Exception("Could not open " . $fileName . " for reading! File does not exist.");
-//
-//$xls = PHPExcel_IOFactory::load($fileName);
-//
-//$xls->setActiveSheetIndex(0);
-//
-//$sheet = $xls->getActiveSheet()->toArray();
-//
-//$xls = null;
-//
-//$halls = array();
-//$hall = '';
-//
-//$timeTable = $sheet[0][0];
-//$timeTable = normalizeTimeTable($timeTable);
-//
-//foreach ($sheet as $key => $value)
-//{
-//	
-//	if (strstr((string)$value[1], 'Зал:'))
-//	{
-//		$tmp = explode(',', $value[1]);
-//		$hall = $tmp[0];
-//	}
-//	
-//	if (strstr((string)$value[1], 'Сеанс') || strstr((string)$value[1], 'Зал:') || $value[1] === null)
-//	{
-//		unset($sheet[$key]);
-//		continue;
-//	}
-//	
-//	if (!$hall == '')
-//		$halls[$hall][] = $value;
-//}
-//
-//$sheet = array_values($sheet);
-//
-//$hallFilms = array();
-//foreach ($halls as $roomHall => $hall)
-//{
-//	for ($i=0; $i<count($hall); $i++)
-//	{
-//		if ($hall[$i][3] == null)
-//			continue;
-//		
-//		$filmName = $hall[$i][3];
-//		$hallFilms[$roomHall][$filmName] = '';
-//		
-//		for ($j=0;$j<count($hall);$j++)
-//		{
-//			if ($hall[$j][3] === $filmName)
-//			{
-//				$hallFilms[$roomHall][$filmName] .= $hall[$j][1] . ',';
-//				$hall[$j][3] = null;
-//			}
-//		}
-//	}
-//}
-//
-//$xls = PHPExcel_IOFactory::load(__DIR__ . '/афиша-заливка.xls');
-//$xls->setActiveSheetIndex(0);
-//
-//$startWith = 3;
-//
-//foreach ($hallFilms as $hallName => $films)
-//{
-//	$counter = 0;
-//	
-//	foreach ($films as $filmName => $filmTime)
-//	{
-//		$cellId = $startWith + $counter;
-//		
-//		$xls->getActiveSheet()
-//			->setCellValue('A'.$cellId, normalizeFilmName($filmName))
-//			->setCellValue('B'.$cellId, $timeTable['startDate'])
-//			->setCellValue('C'.$cellId, $timeTable['endDate'])
-//			->setCellValue('D'.$cellId, normalizeTime($filmTime))
-//			->setCellValue('F'.$cellId, normalizeHallName($hallName));
-//		
-//		$counter++;
-//	}
-//	
-//	$startWith = $cellId + 1;
-//}
-//
-//$objWriter = PHPExcel_IOFactory::createWriter($xls, 'Excel5');
-//$objWriter->save(__DIR__ . '/афиша-заливка.xls');
