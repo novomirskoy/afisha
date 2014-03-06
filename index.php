@@ -8,7 +8,107 @@ date_default_timezone_set('Europe/Moscow');
 
 define('EOL', (PHP_SAPI == 'cli') ? PHP_EOL : '<br/>');
 
-require_once 'func.php';
+function normalizeTime($time)
+{
+	$timeArray = explode(',', $time);
+	
+	foreach ($timeArray as $key => $value)
+	{
+		if ($value == '')
+			unset($timeArray[$key]);
+	}
+	
+	return implode(',', $timeArray);
+}
+
+function normalizeFilmName($filmName)
+{
+	$excess = array(
+		'*',
+		'#',
+		'2D',
+		'3D',
+		'5D',
+		'7D',
+		'12+',
+		'14+',
+		'16+',
+		'18+',
+		'0+',
+		'6+',
+		'1',
+		'2',
+	);
+	
+	$filmName = str_ireplace($excess, '', $filmName);
+	
+	return trim($filmName);
+}
+
+function normalizeHallName($hallName)
+{
+	return str_replace(':', '', $hallName);
+}
+
+function normalizeTimeTable($timeTable, $type=null)
+{
+	if ($type == null)
+		return $timeTable;
+	elseif ($type == 'sinemastar') 
+	{
+		$timeTable = filter_var($timeTable, FILTER_SANITIZE_NUMBER_INT);
+		$timeTable = str_replace('-', '', $timeTable);
+
+		$year = substr($timeTable, -4, 4);
+		$month = substr($timeTable, -6, 2);
+		$dayOn = substr($timeTable, -8, 2);
+		$dayWith = substr($timeTable, 0, 2);
+
+		return array(
+			'startDate' => $dayWith . '.' . $month . '.' . $year,
+			'endDate' => $dayOn . '.' . $month . '.' . $year,
+		);	
+	}
+	elseif ($type == 'sinemapark')
+	{
+		$year = '20' . substr($timeTable, 6, 2);
+		$month = substr($timeTable, 3, 2);
+		$dayOn = substr($timeTable, 0, 2);
+		$dayWith = substr($timeTable, 0, 2);
+		
+		return array(
+			'startDate' => $dayWith . '.' . $month . '.' . $year,
+			'endDate' => $dayOn . '.' . $month . '.' . $year,
+		);	
+	}
+	elseif ($type == 'karorussia')
+	{
+		$date = explode('-', $timeTable);
+		
+		return array(
+			'startDate' => $date[0],
+			'endDate' => $date[1],
+		);		
+	}
+}
+
+function arrayFiles(&$filePost) 
+{
+    $fileArray = array();
+    $fileCount = count($filePost['name']);
+    $fileKeys = array_keys($filePost);
+
+    for ($i=0; $i < $fileCount; $i++) 
+	{
+        foreach ($fileKeys as $key) 
+		{
+            $fileArray[$i][$key] = $filePost[$key][$i];
+        }
+    }
+
+    return $fileArray;
+}
+
 ?>
 
 <!DOCTYPE html>
@@ -200,13 +300,16 @@ require_once 'func.php';
 		require_once 'Classes/PHPExcel/Writer/Excel2007.php';
 		require_once 'Classes/PHPExcel/IOFactory.php';
 		
-		$templateFilename = $uploadDir.'афиша-заливка.xls';
+		$templateFilename = $uploadDir . 'афиша-заливка.xls';
 		$templateXls = PHPExcel_IOFactory::load($templateFilename);
+		$templateXls->setActiveSheetIndex(1);
+		$templateXls->getActiveSheet();
+		$eventsSheet = $templateXls->getActiveSheet()->toArray();
 		$templateXls->setActiveSheetIndex(0);
 		$templateXls->getActiveSheet();
 		$templateXlsSheet = $templateXls->getActiveSheet()->toArray();
 		
-		$cursor = count($templateXlsSheet) + 1;
+		$startWith = 3;
 		
 		foreach ($fileArray as $file)
 		{
@@ -270,8 +373,6 @@ require_once 'func.php';
 						}
 					}
 					
-					$startWith = 3;
-
 					foreach ($hallFilms as $hallName => $films)
 					{
 						$counter = 0;
@@ -279,12 +380,24 @@ require_once 'func.php';
 						foreach ($films as $filmName => $filmTime)
 						{
 							$cellId = $startWith + $counter;
+							
+							foreach ($eventsSheet as $event)
+							{
+								if (trim($event[1]) == normalizeFilmName($filmName))
+								{
+									$eventId = $event[0];
+									break;
+								}
+								else
+									$eventId = 'Событие не найдено!';
+							}
 
 							$templateXls->getActiveSheet()
 										->setCellValue('A'.$cellId, normalizeFilmName($filmName))
 										->setCellValue('B'.$cellId, $timeTable['startDate'])
 										->setCellValue('C'.$cellId, $timeTable['endDate'])
 										->setCellValue('D'.$cellId, normalizeTime($filmTime))
+										->setCellValue('E'.$cellId, $eventId)
 										->setCellValue('F'.$cellId, normalizeHallName($hallName));
 
 							$counter++;
@@ -293,11 +406,10 @@ require_once 'func.php';
 						$startWith = $cellId + 1;
 					}
 					
-					$cursor += $startWith;
-					
 					$objWriter = PHPExcel_IOFactory::createWriter($templateXls, 'Excel5');
-					$objWriter->save(__DIR__ . '/афиша-заливка.xls');
+					$objWriter->save(__DIR__ . '/sinema_star_mod.xls');
 					$objPHPExcel = null;
+					exit;
 					break;
 				case 'SinemaPark':
 					if (!file_exists($fileName))
@@ -318,7 +430,7 @@ require_once 'func.php';
 						if (strstr($value[0], 'Зал'))
 							$hall = $value[0];
 
-						if (($value[1] == '' && $value[2] == '') || strstr($value[0], 'Зал'))
+						if (($value[1] == '' && $value[2] == '') || strstr($value[0], 'Зал') || strstr($value[1], '*'))
 						{
 							unset($afishaSheet[$key]);
 							continue;
@@ -330,31 +442,127 @@ require_once 'func.php';
 					
 					foreach ($halls as $roomHall => $hall)
 					{
+						$counter = 0;
+						
 						foreach ($hall as $film)
 						{
+							$cellId = $startWith + $counter;
 							$filmTime = '';
-//							$templateXls->getActiveSheet()
-//										->setCellValue('A'.$cellId, normalizeFilmName($filmName))
-//										->setCellValue('B'.$cellId, $timeTable['startDate'])
-//										->setCellValue('C'.$cellId, $timeTable['endDate'])
-//										->setCellValue('D'.$cellId, normalizeTime($filmTime))
-//										->setCellValue('F'.$cellId, normalizeHallName($hallName));
-							echo $roomHall . ' =><br/>';
-							echo $film[1] . '<br/>';
-							for ($i=3; $i<29;$i++)
+							
+							for ($i=3; $i<29; $i++)
 							{
 								if ($film[$i] !== '')
 									$filmTime .= $film[$i] . ',';
 							}
-							echo normalizeTime($filmTime) . '<br/>';
+							
+							foreach ($eventsSheet as $event)
+							{
+								if (trim($event[1]) == normalizeFilmName($film[1]))
+								{
+									$eventId = $event[0];
+									break;
+								}
+								else
+									$eventId = 'Событие не найдено!';
+							}
+							
+							$templateXls->getActiveSheet()
+										->setCellValue('A'.$cellId, normalizeFilmName($film[1]))
+										->setCellValue('B'.$cellId, $timeTable['startDate'])
+										->setCellValue('C'.$cellId, $timeTable['endDate'])
+										->setCellValue('D'.$cellId, normalizeTime($filmTime))
+										->setCellValue('E'.$cellId, $eventId)
+										->setCellValue('F'.$cellId, $roomHall);
+							
+							$counter++;
 						}
+						
+						$startWith = $cellId + 1;
 					}
 					
-					echo '<pre>';
-//					print_r($halls);
-//					print_r($afishaSheet);
-					echo '</pre>';
+					
+					$objWriter = PHPExcel_IOFactory::createWriter($templateXls, 'Excel5');
+					$objWriter->save(__DIR__ . '/sinema_park_mod.xls');
+					$objPHPExcel = null;
 					exit;
+					break;
+				case 'KaroRussia':
+					if (!file_exists($fileName))
+						throw new Exception("Could not open " . $fileName . " for reading! File does not exist.");
+					
+					$afisha = PHPExcel_IOFactory::load($fileName);
+					$afishaSheet = $afisha->getActiveSheet()->toArray();
+					$afisha = null;
+					
+					$timeTable = normalizeTimeTable($afishaSheet[2][0], 'karorussia');
+					
+					$halls = array();
+					$hall = '';
+					
+					foreach ($afishaSheet as $key => $value)
+					{
+						if ($value[0] == '1' || $value[0] == '2' || $value[0] == '3')
+						{
+							$hall = 'Зал '.$value[0];
+						}
+						
+						if ($value[2] != '')
+							$halls[$hall][] = $value;
+						
+						unset($afishaSheet[$key]);
+					}
+					unset($halls['']);
+					
+					foreach ($halls as $roomHall => $hall)
+					{
+						$counter = 0;
+						
+						foreach ($hall as $film)
+						{
+							$cellId = $startWith + $counter;
+							$filmTime = '';
+							
+							for ($i=3; $i<16; $i++)
+							{
+								if ($film[$i] !== '')
+									$filmTime .= $film[$i] . ',';
+							}
+							
+							if ($film[2] == 'Подготовлено:' || $film[2] == 'Изменено:')
+							{
+								unset($film);
+								break;
+							}
+							
+							foreach ($eventsSheet as $event)
+							{
+								if (trim($event[1]) == normalizeFilmName($film[2]))
+								{
+									$eventId = $event[0];
+									break;
+								}
+								else
+									$eventId = 'Событие не найдено!';
+							}
+							
+							$templateXls->getActiveSheet()
+										->setCellValue('A'.$cellId, normalizeFilmName($film[2]))
+										->setCellValue('B'.$cellId, $timeTable['startDate'])
+										->setCellValue('C'.$cellId, $timeTable['endDate'])
+										->setCellValue('D'.$cellId, normalizeTime($filmTime))
+										->setCellValue('E'.$cellId, $eventId)
+										->setCellValue('F'.$cellId, $roomHall);
+							
+							$counter++;
+						}
+						
+						$startWith = $cellId + 1;
+					}
+					
+										
+					$objWriter = PHPExcel_IOFactory::createWriter($templateXls, 'Excel5');
+					$objWriter->save(__DIR__ . '/karo_russia_mod.xls');
+					$objPHPExcel = null;
 					break;
 				default:
 					break;
